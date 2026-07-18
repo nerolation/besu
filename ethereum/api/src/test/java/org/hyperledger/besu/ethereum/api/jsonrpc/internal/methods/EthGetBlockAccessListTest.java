@@ -49,6 +49,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.units.bigints.UInt256;
 import org.junit.jupiter.api.BeforeEach;
@@ -97,6 +98,67 @@ public class EthGetBlockAccessListTest {
 
     final BlockAccessListResult result = (BlockAccessListResult) successResponse.getResult();
     assertThat(result.getAccountChanges()).hasSize(2);
+  }
+
+  @Test
+  public void shouldSerializeBlockAccessListAsBareArrayMatchingSpecSchema() throws Exception {
+    final long blockNumber = 5L;
+    final BlockHeader header = blockDataGenerator.header(blockNumber);
+    final Hash blockHash = header.getHash();
+
+    when(blockchainQueries.headBlockNumber()).thenReturn(10L);
+    when(blockchainQueries.getBlockHashByNumber(blockNumber)).thenReturn(Optional.of(blockHash));
+    when(blockchainQueries.getBlockHeaderByHash(blockHash)).thenReturn(Optional.of(header));
+    when(blockchainQueries.isBlockAccessListSupported(header)).thenReturn(true);
+    when(blockchain.getBlockAccessList(blockHash)).thenReturn(Optional.of(sampleBlockAccessList()));
+
+    final JsonRpcResponse response = requestBlockAccessList(String.format("0x%X", blockNumber));
+    final Object result = ((JsonRpcSuccessResponse) response).getResult();
+
+    final ObjectMapper mapper = new ObjectMapper();
+    final String expectedJson =
+        """
+        [
+          {
+            "address": "0x1234567890123456789012345678901234567890",
+            "storageChanges": [
+              {
+                "key": "0x0000000000000000000000000000000000000000000000000000000000000001",
+                "changes": [
+                  {
+                    "index": "0x1",
+                    "value": "0x0000000000000000000000000000000000000000000000000000000000000064"
+                  }
+                ]
+              }
+            ],
+            "storageReads": [],
+            "balanceChanges": [{"index": "0x1", "value": "0x3e8"}],
+            "nonceChanges": [{"index": "0x1", "value": "0x5"}],
+            "codeChanges": []
+          },
+          {
+            "address": "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+            "storageChanges": [
+              {
+                "key": "0x0000000000000000000000000000000000000000000000000000000000000002",
+                "changes": [
+                  {
+                    "index": "0x2",
+                    "value": "0x00000000000000000000000000000000000000000000000000000000000000c8"
+                  }
+                ]
+              }
+            ],
+            "storageReads": ["0x0000000000000000000000000000000000000000000000000000000000000001"],
+            "balanceChanges": [],
+            "nonceChanges": [],
+            "codeChanges": [{"index": "0x1", "code": "0x60806040"}]
+          }
+        ]
+        """;
+    assertThat(mapper.readTree(mapper.writeValueAsString(result)))
+        .isEqualTo(mapper.readTree(expectedJson));
   }
 
   @Test
@@ -158,8 +220,7 @@ public class EthGetBlockAccessListTest {
 
     assertThat(response).isInstanceOf(JsonRpcErrorResponse.class);
     final JsonRpcErrorResponse errorResponse = (JsonRpcErrorResponse) response;
-    assertThat(errorResponse.getErrorType())
-        .isEqualTo(RpcErrorType.BLOCK_ACCESS_LIST_NOT_AVAILABLE_FOR_PRE_AMSTERDAM_BLOCKS);
+    assertThat(errorResponse.getErrorType()).isEqualTo(RpcErrorType.RESOURCE_NOT_FOUND);
   }
 
   @Test
@@ -214,8 +275,7 @@ public class EthGetBlockAccessListTest {
 
     assertThat(response).isInstanceOf(JsonRpcErrorResponse.class);
     final JsonRpcErrorResponse errorResponse = (JsonRpcErrorResponse) response;
-    assertThat(errorResponse.getErrorType())
-        .isEqualTo(RpcErrorType.BLOCK_ACCESS_LIST_NOT_AVAILABLE_FOR_PRE_AMSTERDAM_BLOCKS);
+    assertThat(errorResponse.getErrorType()).isEqualTo(RpcErrorType.RESOURCE_NOT_FOUND);
   }
 
   @Test

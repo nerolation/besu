@@ -14,6 +14,7 @@
  */
 package org.hyperledger.besu.ethereum.api.jsonrpc.internal.results;
 
+import org.hyperledger.besu.datatypes.StorageSlotKey;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.AccountChanges;
 import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.BalanceChange;
@@ -25,18 +26,20 @@ import org.hyperledger.besu.ethereum.mainnet.block.access.list.BlockAccessList.S
 import java.util.List;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
-import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonValue;
 import org.apache.tuweni.units.bigints.UInt256;
 
+/**
+ * JSON result for a block access list (EIP-7928), serialized as a bare array of account changes as
+ * defined by the execution-apis schema for eth_getBlockAccessList.
+ */
 public class BlockAccessListResult {
 
   private final List<AccountChangesResult> accountChanges;
 
-  @JsonCreator
-  public BlockAccessListResult(
-      @JsonProperty("accountChanges") final List<AccountChangesResult> accountChanges) {
-    this.accountChanges = accountChanges;
+  @JsonCreator(mode = JsonCreator.Mode.DELEGATING)
+  public BlockAccessListResult(final List<AccountChangesResult> accountChanges) {
+    this.accountChanges = accountChanges == null ? List.of() : accountChanges;
   }
 
   public static BlockAccessListResult fromBlockAccessList(final BlockAccessList list) {
@@ -44,11 +47,11 @@ public class BlockAccessListResult {
         list.accountChanges().stream().map(AccountChangesResult::new).toList());
   }
 
+  @JsonValue
   public List<AccountChangesResult> getAccountChanges() {
     return accountChanges;
   }
 
-  @JsonInclude(JsonInclude.Include.NON_EMPTY)
   public static class AccountChangesResult {
     public final String address;
     public final List<SlotChangeResult> storageChanges;
@@ -60,10 +63,7 @@ public class BlockAccessListResult {
     public AccountChangesResult(final AccountChanges changes) {
       this.address = changes.address().toString();
       this.storageChanges = changes.storageChanges().stream().map(SlotChangeResult::new).toList();
-      this.storageReads =
-          changes.storageReads().stream()
-              .map(sr -> sr.slot().getSlotKey().map(UInt256::toHexString).orElse(""))
-              .toList();
+      this.storageReads = changes.storageReads().stream().map(sr -> slotKeyHex(sr.slot())).toList();
       this.balanceChanges =
           changes.balanceChanges().stream().map(BalanceChangeResult::new).toList();
       this.nonceChanges = changes.nonceChanges().stream().map(NonceChangeResult::new).toList();
@@ -71,58 +71,63 @@ public class BlockAccessListResult {
     }
   }
 
-  @JsonInclude(JsonInclude.Include.NON_EMPTY)
   public static class SlotChangeResult {
-    public final String slot;
+    public final String key;
     public final List<StorageChangeResult> changes;
 
     public SlotChangeResult(final SlotChanges changes) {
-      this.slot = changes.slot().getSlotKey().map(UInt256::toHexString).orElse("null");
+      this.key = slotKeyHex(changes.slot());
       this.changes = changes.changes().stream().map(StorageChangeResult::new).toList();
     }
   }
 
-  @JsonInclude(JsonInclude.Include.NON_EMPTY)
   public static class StorageChangeResult {
-    public final long txIndex;
-    public final String newValue;
+    public final String index;
+    public final String value;
 
     public StorageChangeResult(final StorageChange change) {
-      this.txIndex = change.txIndex();
-      this.newValue = change.newValue().toHexString();
+      this.index = Quantity.create(change.txIndex());
+      this.value = change.newValue().toHexString();
     }
   }
 
-  @JsonInclude(JsonInclude.Include.NON_EMPTY)
   public static class BalanceChangeResult {
-    public final long txIndex;
-    public final String postBalance;
+    public final String index;
+    public final String value;
 
     public BalanceChangeResult(final BalanceChange change) {
-      this.txIndex = change.txIndex();
-      this.postBalance = change.postBalance().toHexString();
+      this.index = Quantity.create(change.txIndex());
+      this.value = change.postBalance().toShortHexString();
     }
   }
 
-  @JsonInclude(JsonInclude.Include.NON_EMPTY)
   public static class NonceChangeResult {
-    public final long txIndex;
-    public final long newNonce;
+    public final String index;
+    public final String value;
 
     public NonceChangeResult(final NonceChange change) {
-      this.txIndex = change.txIndex();
-      this.newNonce = change.newNonce();
+      this.index = Quantity.create(change.txIndex());
+      this.value = Quantity.create(change.newNonce());
     }
   }
 
-  @JsonInclude(JsonInclude.Include.NON_EMPTY)
   public static class CodeChangeResult {
-    public final long txIndex;
-    public final String newCode;
+    public final String index;
+    public final String code;
 
     public CodeChangeResult(final CodeChange change) {
-      this.txIndex = change.txIndex();
-      this.newCode = change.newCode().toBase64String();
+      this.index = Quantity.create(change.txIndex());
+      this.code = change.newCode().toHexString();
     }
+  }
+
+  /**
+   * Well-formed block access lists always carry the slot key preimage (the RLP encoder relies on
+   * it); fall back to the slot hash in the pathological case where it is absent.
+   */
+  private static String slotKeyHex(final StorageSlotKey slot) {
+    return slot.getSlotKey()
+        .map(UInt256::toHexString)
+        .orElseGet(() -> slot.getSlotHash().toHexString());
   }
 }
